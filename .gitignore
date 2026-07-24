@@ -30,3 +30,12 @@
 *.exe
 *.out
 *.app
+
+build/*
+
+# But track the executable
+!build/job-scraper.exe
+
+# Executables in root (already covered by *.exe but just in case)
+main.exe
+job-scraper.exe
