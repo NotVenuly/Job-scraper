@@ -50,6 +50,26 @@ std::string Trimmer(std::string s)
     return s;
 }
 
+const std::vector<std::string> blockedWords = {
+    "senior",
+    "nuohooja",
+    "kokki"
+};
+
+bool SkipJob(const std::string& title)
+{
+    std::string lower = title;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {return std::tolower(c); });
+
+    for (const auto& word : blockedWords)
+    {
+        if (lower.find(word) != std::string::npos)
+            return true;
+    }
+
+    return false;
+}
+
 void ParseChildren(lxb_dom_node_t* parent, std::string& out)
 {
     for (lxb_dom_node_t* child = parent->first_child; child != nullptr; child = child->next)
@@ -130,6 +150,11 @@ static lxb_status_t Callback(lxb_dom_node_t* node, lxb_css_selector_specificity_
         
         std::string url((const char*)href, href_len);
         std::string jobName = Trimmer(std::string((const char*)title, title_len));
+        if (SkipJob(jobName))
+        {
+            std::cout << "Skipped: " << jobName << std::endl;
+            return LXB_STATUS_OK;
+        }
         std::string returnedStr;
         
         try{
