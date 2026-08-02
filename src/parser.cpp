@@ -24,6 +24,23 @@ void ParseChildren(lxb_dom_node_t* parent, std::string& out);
 void ParseNode(lxb_dom_node_t* node, std::string& out);
 std::map<std::string, std::pair<std::string, std::string>> Parse(char htmlIN[], size_t htmlIN_len, const char selectorStr[], std::string* returnedStr, bool isDetail);
 
+
+
+
+std::string AddBlockquote(const std::string& text)
+{
+    std::string result = "> ";
+
+    for (char c : text)
+    {
+        result += c;
+        if (c == '\n')
+            result += "> ";
+    }
+
+    return result;
+}
+
 std::string Trimmer(std::string s)
 {
     s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); }));
@@ -112,7 +129,7 @@ static lxb_status_t Callback(lxb_dom_node_t* node, lxb_css_selector_specificity_
     if(href && title && href_len && title_len> 0){
         
         std::string url((const char*)href, href_len);
-        std::string jobName((const char*)title, title_len);
+        std::string jobName = Trimmer(std::string((const char*)title, title_len));
         std::string returnedStr;
         
         try{
@@ -128,6 +145,10 @@ static lxb_status_t Callback(lxb_dom_node_t* node, lxb_css_selector_specificity_
             listHtml[listHtml_len] = '\0';
             
             Parse(listHtml.data(), listHtml_len, "div.field__item.even", &returnedStr, true);
+
+            returnedStr = "> [!note]- " + jobName + "\n>\n" + AddBlockquote(returnedStr);
+
+            jobs->jobData[jobName] = std::make_pair(url, returnedStr);
 
 
         }

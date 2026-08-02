@@ -44,58 +44,60 @@ int main(int argc, char** argv) {
         string file = "jobs/page-";
         map<string, pair<string, string>> jobData;
         
-    for(int pageNum = 1; pageNum <= 2; pageNum++){
-        string fileName = file + to_string(pageNum) + ".md";
+    const int pagesPerFile = 2;
+    const int totalPages = 10;
+
+    for (int fileStart = 1; fileStart <= totalPages; fileStart ++)
+    {
+        string fileName = "jobs/page-" + to_string(fileStart) + ".md";
         ofstream MyFile(fileName);
 
-        try {
-            cpr::Response r = cpr::Get(
-                // cpr::Url{"https://duunitori.fi/tyopaikat/alue/uusimaa"
-                cpr::Url{"https://www.jobly.fi/en/jobs"},
-                cpr::Parameters{
-                {"search", ""},
-                {"job_geo_location", "Uusimaa, Suomi"},
-                {"Search_jobs", "Search jobs"},
-                {"lat", "60.21872"},
-                {"lon", "25.2716209"},
-                {"country", "Suomi"},
-                {"administrative_area_level_1", "Uusimaa"},
-                {"page", TransformPage(pageNum)}
-            });
+        for (int pageNum = fileStart; pageNum < fileStart + pagesPerFile && pageNum <= totalPages; pageNum++)
+        {
 
-            cout << r.status_code << endl;
+            try {
+                cpr::Response r = cpr::Get(
+                    // cpr::Url{"https://duunitori.fi/tyopaikat/alue/uusimaa"
+                    cpr::Url{"https://www.jobly.fi/en/jobs"},
+                    cpr::Parameters{
+                    {"search", ""},
+                    {"job_geo_location", "Uusimaa, Suomi"},
+                    {"Search_jobs", "Search jobs"},
+                    {"lat", "60.21872"},
+                    {"lon", "25.2716209"},
+                    {"country", "Suomi"},
+                    {"administrative_area_level_1", "Uusimaa"},
+                    {"page", TransformPage(pageNum)}
+                });
 
-            size_t listHtml_len = r.text.length();
-            std::vector<char> listHtml(listHtml_len + 1, 0);
-    
-            for (size_t i = 0; i < listHtml_len; ++i) {
-                listHtml[i] = r.text[i];
+                cout << r.status_code << endl;
+
+                size_t listHtml_len = r.text.length();
+                std::vector<char> listHtml(listHtml_len + 1, 0);
+        
+                for (size_t i = 0; i < listHtml_len; ++i) {
+                    listHtml[i] = r.text[i];
+                }
+                listHtml[listHtml_len] = '\0';
+                
+                string emptyStr;
+
+                auto pageJobs = Parse(listHtml.data(), listHtml_len, "div.job__content.clearfix > h2.node__title.node__title > a", &emptyStr, false);
+
+                for (const auto& job : pageJobs)
+                {
+                    MyFile << "[" << Trim(job.first) << "](" << job.second.first << ")\n";
+                    MyFile << job.second.second << "\n";
+                    MyFile << "***\n\n";
+                }
+                
+            } catch (const std::exception& e) {
+                cout << "Exception: " << e.what() << endl;
+                cout << "Press Enter to exit..." << endl;
+                cin.get();
             }
-            listHtml[listHtml_len] = '\0';
-            
-            string emptyStr;
-    
-            auto pageJobs = Parse(listHtml.data(), listHtml_len, "div.job__content.clearfix > h2.node__title.node__title > a", &emptyStr, false);
-
-            jobData = pageJobs;
-
-            for (auto job : jobData){
-
-                MyFile << "## " << "[" << Trim(job.first) << "]" << "(" << job.second.first << ") \n" << '\n';
-                MyFile << "### Description \n" << job.second.second << endl; 
-                MyFile << "***" << '\n' << '\n';
-            }
-            
-        } catch (const std::exception& e) {
-            cout << "Exception: " << e.what() << endl;
-            cout << "Press Enter to exit..." << endl;
-            cin.get();
         }
     }
-
-
-
-
 
     cout << "Press Enter to exit..." << endl;
     cin.get();
