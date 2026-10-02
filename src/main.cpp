@@ -16,50 +16,90 @@
 
 using namespace std;
 
-string TransformPage(int num){
-    return to_string(num);
-}
-
 
 std::string Trim(std::string s)
 {
     s.erase(s.begin(), std::find_if(s.begin(), s.end(),
-        [](unsigned char ch) { return !std::isspace(ch); }));
-
+    [](unsigned char ch) { return !std::isspace(ch); }));
+    
     s.erase(std::find_if(s.rbegin(), s.rend(),
-        [](unsigned char ch) { return !std::isspace(ch); }).base(),
-        s.end());
-
+    [](unsigned char ch) { return !std::isspace(ch); }).base(),
+    s.end());
+    
     return s;
 }
 
-int main(int argc, char** argv) {
+void ScrapeSite(std::ofstream& file, const cpr::Url& url, const cpr::Parameters& params, const char* listSelector, const SiteConfig& config){
+    
+    cpr::Response r = cpr::Get(url, params);
 
+    cout << r.status_code << endl;
+    if (r.status_code != 200)
+    {
+        std::cout << "Failed: " << r.status_code << '\n';
+        return;
+    }
+    size_t listHtml_len = r.text.length();
+
+    std::vector<char> listHtml(r.text.begin(), r.text.end());
+    listHtml.push_back('\0');   
+    
+    string emptyStr;
+
+    auto pageJobs = Parse(listHtml.data(), listHtml_len, listSelector, &emptyStr, false, config);
+
+       for (const auto& job : pageJobs)
+        {
+            file << "#### [" << Trim(job.first) << "](" << job.second.first << ")\n";
+            file << job.second.second << "\n";
+            file << "***\n\n";
+        }
+
+}
+
+int main(int argc, char** argv) {
+    
     #ifdef _WIN32
         SetConsoleOutputCP(CP_UTF8);
         SetConsoleCP(CP_UTF8);
     #endif
-        
-        std::setlocale(LC_ALL, "en_US.utf8");
-        string file = "jobs/page-";
-        map<string, pair<string, string>> jobData;
-        
-    const int pagesPerFile = 2;
+    
+    std::setlocale(LC_ALL, "en_US.utf8");
+    string file = "jobs/page-";
+    map<string, pair<string, string>> jobData;
+
     const int totalPages = 10;
+    const int initialPage = 58;
+    
+    SiteConfig joblyConfig{
+        "Jobly",
+        "",
+        "div.field__item.even"
+    };
+    
+    SiteConfig duunitoriConfig{
+        "Duunitori",
+        "https://duunitori.fi",
+        "div.description-box"
+    };
 
-    for (int fileStart = 1; fileStart <= totalPages; fileStart ++)
+    int numPage = 1;
+    
+
+        
+    for (int step = 0; step < totalPages; step++)
     {
-        string fileName = "jobs/page-" + to_string(fileStart) + ".md";
+        int pageNum = initialPage + step;
+        string fileName = "jobs/page-" + to_string(pageNum) + ".md";
         ofstream MyFile(fileName);
+        numPage ++;
+        
+        try {
 
-        for (int pageNum = fileStart; pageNum < fileStart + pagesPerFile && pageNum <= totalPages; pageNum++)
-        {
-
-            try {
-                cpr::Response r = cpr::Get(
-                    // cpr::Url{"https://duunitori.fi/tyopaikat/alue/uusimaa"
-                    cpr::Url{"https://www.jobly.fi/en/jobs"},
-                    cpr::Parameters{
+            ScrapeSite(
+                MyFile,
+                cpr::Url{"https://www.jobly.fi/en/jobs"},
+                {
                     {"search", ""},
                     {"job_geo_location", "Uusimaa, Suomi"},
                     {"Search_jobs", "Search jobs"},
@@ -67,39 +107,45 @@ int main(int argc, char** argv) {
                     {"lon", "25.2716209"},
                     {"country", "Suomi"},
                     {"administrative_area_level_1", "Uusimaa"},
-                    {"page", TransformPage(pageNum)}
-                });
+                    {"page", to_string(pageNum)}
+                },
+                "div.job__content.clearfix > h2.node__title.node__title > a",
+                joblyConfig
+            );
 
-                cout << r.status_code << endl;
 
-                size_t listHtml_len = r.text.length();
-                std::vector<char> listHtml(listHtml_len + 1, 0);
-        
-                for (size_t i = 0; i < listHtml_len; ++i) {
-                    listHtml[i] = r.text[i];
-                }
-                listHtml[listHtml_len] = '\0';
-                
-                string emptyStr;
 
-                auto pageJobs = Parse(listHtml.data(), listHtml_len, "div.job__content.clearfix > h2.node__title.node__title > a", &emptyStr, false);
+            
+        } catch (const std::exception& e) {
+            cout << "Exception: " << e.what() << endl;
+            cout << "Press Enter to exit..." << endl;
+            std::cin.get();
+        }
 
-                for (const auto& job : pageJobs)
+        try{
+
+            ScrapeSite(
+                MyFile,
+                cpr::Url{"https://duunitori.fi/tyopaikat"},
                 {
-                    MyFile << "[" << Trim(job.first) << "](" << job.second.first << ")\n";
-                    MyFile << job.second.second << "\n";
-                    MyFile << "***\n\n";
-                }
-                
-            } catch (const std::exception& e) {
-                cout << "Exception: " << e.what() << endl;
-                cout << "Press Enter to exit..." << endl;
-                cin.get();
-            }
+                    {"alue", "uusimaa"},
+                    {"sivu", to_string(pageNum)}
+                },
+                "a.job-box__hover.gtm-search-result",
+                duunitoriConfig
+            );
+
+        }catch (const std::exception& e) {
+            cout << "Exception: " << e.what() << endl;
+            cout << "Press Enter to exit..." << endl;
+            std::cin.get();
         }
     }
 
+
     cout << "Press Enter to exit..." << endl;
-    cin.get();
+    std::cin.get();
     return 0;
 }
+
+

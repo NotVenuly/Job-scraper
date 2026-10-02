@@ -20,9 +20,16 @@ struct SavedJobs{
 
 };
 
+struct SiteConfig
+{
+    std::string siteName;
+    std::string baseUrl;
+    const char* detailSelector;
+};
+
 void ParseChildren(lxb_dom_node_t* parent, std::string& out);
 void ParseNode(lxb_dom_node_t* node, std::string& out);
-std::map<std::string, std::pair<std::string, std::string>> Parse(char htmlIN[], size_t htmlIN_len, const char selectorStr[], std::string* returnedStr, bool isDetail);
+std::map<std::string, std::pair<std::string, std::string>> Parse(char htmlIN[], size_t htmlIN_len, const char selectorStr[], std::string* returnedStr, bool isDetail, const SiteConfig& config);
 
 
 
@@ -53,7 +60,8 @@ std::string Trimmer(std::string s)
 const std::vector<std::string> blockedWords = {
     "senior",
     "nuohooja",
-    "kokki"
+    "kokki",
+    "hoitaja"
 };
 
 bool SkipJob(const std::string& title)
@@ -134,67 +142,103 @@ static lxb_status_t Detail(lxb_dom_node_t* node, lxb_css_selector_specificity_t 
 
     return LXB_STATUS_OK;
 }
-    
-static lxb_status_t Callback(lxb_dom_node_t* node, lxb_css_selector_specificity_t spec, void* voidJob )
+
+struct CallbackData
 {
-    SavedJobs* jobs = (SavedJobs*)voidJob;
+    SavedJobs* jobs;
+    SiteConfig config;
+};
+
+static lxb_status_t JobCallback(
+    lxb_dom_node_t* node,
+    lxb_css_selector_specificity_t,
+    void* voidData)
+{
+    CallbackData* data = static_cast<CallbackData*>(voidData);
+    SavedJobs* jobs = data->jobs;
+
     lxb_dom_element_t* element = lxb_dom_interface_element(node);
+
     size_t href_len;
     size_t title_len;
-    
-    const lxb_char_t* href = lxb_dom_element_get_attribute(element, (const lxb_char_t*)"href", 4, &href_len);
-    const lxb_char_t* title = lxb_dom_node_text_content(node, &title_len);
-    
-    
-    if(href && title && href_len && title_len> 0){
-        
-        std::string url((const char*)href, href_len);
-        std::string jobName = Trimmer(std::string((const char*)title, title_len));
-        if (SkipJob(jobName))
+
+    const lxb_char_t* href =
+        lxb_dom_element_get_attribute(
+            element,
+            (const lxb_char_t*)"href",
+            4,
+            &href_len);
+
+    const lxb_char_t* title =
+        lxb_dom_node_text_content(node, &title_len);
+
+    if (!(href && title && href_len && title_len > 0))
+        return LXB_STATUS_OK;
+
+    std::string url((const char*)href, href_len);
+
+    // Make relative URLs absolute
+    if (!data->config.baseUrl.empty() && url[0] == '/')
+    {
+        url = data->config.baseUrl + url;
+    }
+
+    std::string jobName =
+        Trimmer(std::string((const char*)title, title_len));
+
+    if (SkipJob(jobName))
+    {
+        std::cout << "Skipped: " << jobName << '\n';
+        return LXB_STATUS_OK;
+    }
+
+    std::string returnedStr;
+
+    try
+    {
+        cpr::Response r = cpr::Get(cpr::Url{url});
+
+        if (r.status_code != 200)
         {
-            std::cout << "Skipped: " << jobName << std::endl;
+            std::cout << "Failed: " << r.status_code << '\n';
             return LXB_STATUS_OK;
         }
-        std::string returnedStr;
-        
-        try{
-            cpr::Response r = cpr::Get(cpr::Url{url});
-            
-            size_t listHtml_len = r.text.length();
-            std::vector<char> listHtml(listHtml_len + 1, 0);
-            
-            for (size_t i = 0; i < listHtml_len; ++i) {
-                listHtml[i] = r.text[i];
-            }
-            
-            listHtml[listHtml_len] = '\0';
-            
-            Parse(listHtml.data(), listHtml_len, "div.field__item.even", &returnedStr, true);
 
-            returnedStr = "> [!note]- " + jobName + "\n>\n" + AddBlockquote(returnedStr);
+        std::vector<char> html(r.text.begin(), r.text.end());
+        html.push_back('\0');
 
-            jobs->jobData[jobName] = std::make_pair(url, returnedStr);
+        Parse(
+            html.data(),
+            html.size() - 1,
+            data->config.detailSelector,
+            &returnedStr,
+            true,
+            data->config
+        );
 
+        returnedStr =
+            "> [!note]- " + jobName +
+            "\n>\n" +
+            AddBlockquote(returnedStr);
 
-        }
-        catch (const std::exception& e) {
-            std::cout << "Exception: " << e.what() << std::endl;
-            std::cout << "Press Enter to exit..." << std::endl;
-            std::cin.get();
-        }
-        
-        jobs->jobData[jobName] = std::make_pair(url, returnedStr);
+        jobs->jobData[jobName] = {url, returnedStr};
     }
-    
-    std::cout << "Found job: " << std::string((const char*)title, title_len) << std::endl;
-    
+    catch (const std::exception& e)
+    {
+        std::cout << "Exception: " << e.what() << '\n';
+    }
+
+    std::cout << "Found job: " << jobName << '\n';
+    std::cout << "Site: " << data->config.siteName << '\n';
+
     return LXB_STATUS_OK;
 }
 
-static lxb_status_t CallFind(lxb_selectors* selectors, lxb_html_document* document, lxb_css_selector_list* selector_list, std::string* usedStr, SavedJobs* jobClass, bool isDetail){
 
-    if(isDetail){
-
+static lxb_status_t CallFind(lxb_selectors* selectors, lxb_html_document* document, lxb_css_selector_list* selector_list, std::string* usedStr, SavedJobs* jobClass, bool isDetail, const SiteConfig& config)
+{
+    if (isDetail)
+    {
         return lxb_selectors_find(
             selectors,
             lxb_dom_interface_node(document),
@@ -202,19 +246,23 @@ static lxb_status_t CallFind(lxb_selectors* selectors, lxb_html_document* docume
             Detail,
             (void*)usedStr
         );
-    }else{
-
-        return lxb_selectors_find(
-            selectors,
-            lxb_dom_interface_node(document),
-            selector_list,
-            Callback,
-            (void*)jobClass
-        );
     }
+
+    CallbackData callbackData{
+        jobClass,
+        config
+    };
+
+    return lxb_selectors_find(
+        selectors,
+        lxb_dom_interface_node(document),
+        selector_list,
+        JobCallback,
+        (void*)&callbackData
+    );
 }
 
-std::map<std::string, std::pair<std::string, std::string>> Parse(char htmlIN[], size_t htmlIN_len, const char selectorStr[], std::string* returnedStr, bool isDetail)
+std::map<std::string, std::pair<std::string, std::string>> Parse(char htmlIN[], size_t htmlIN_len, const char selectorStr[], std::string* returnedStr, bool isDetail, const SiteConfig& config)
 {
     SavedJobs jobClass;
     const lxb_char_t *selector_string = (const lxb_char_t*)selectorStr;
@@ -252,7 +300,8 @@ std::map<std::string, std::pair<std::string, std::string>> Parse(char htmlIN[], 
         selector_list,
         returnedStr,
         &jobClass,
-        isDetail
+        isDetail,
+        config
     );
 
     std::cout << "Parsing complete." << std::endl;
